@@ -26,7 +26,7 @@
     <div class="top-actions">
       <button id="exportBtn" class="btn primary" disabled>
         <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 3v12m0 0l-5-5m5 5l5-5M4 19h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        Download PDF
+        Download
       </button>
     </div>
   </header>
@@ -144,10 +144,33 @@
   </main>
 
   <dialog id="exportDialog">
-    <h3 id="exportTitle">Making your PDF…</h3>
-    <p id="exportText" class="muted"></p>
-    <div class="bar"><div id="exportBar"></div></div>
-    <div class="dialog-actions"><button id="exportClose" class="btn ghost" hidden>Close</button></div>
+    <form id="exportChoose" method="dialog">
+      <h3>Download your book</h3>
+      <p class="muted">Every page is 300 dpi with bleed included.</p>
+      <div class="choices">
+        <label class="choice">
+          <input type="radio" name="format" value="jpeg" checked>
+          <span><strong>JPEG pages (.zip)</strong>One image per page. Upload each one as a full-page layout in your printer's editor, e.g. MILK Books.</span>
+        </label>
+        <label class="check sub" id="spreadOpt">
+          <input type="checkbox" id="spreadsChk"> Join facing pages into spreads, for lay-flat books (first and last pages stay single)
+        </label>
+        <label class="choice">
+          <input type="radio" name="format" value="pdf">
+          <span><strong>PDF</strong>One print-ready file for printers that take PDFs, e.g. Blurb.</span>
+        </label>
+      </div>
+      <div class="dialog-actions">
+        <button value="cancel" class="btn ghost" formnovalidate>Cancel</button>
+        <button id="exportGo" value="go" class="btn primary">Download</button>
+      </div>
+    </form>
+    <div id="exportRun" hidden>
+      <h3 id="exportTitle">Making your file…</h3>
+      <p id="exportText" class="muted"></p>
+      <div class="bar"><div id="exportBar"></div></div>
+      <div class="dialog-actions"><button id="exportClose" class="btn ghost" hidden>Close</button></div>
+    </div>
   </dialog>
 
   <div id="toast" class="toast" hidden></div>

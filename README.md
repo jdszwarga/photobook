@@ -1,11 +1,13 @@
 # Photobook
 
-A web app that turns a year of Google Photos into a print-ready photo book PDF.
+A web app that turns a year of Google Photos into print-ready photo book pages (JPEG pages or a PDF).
 
 1. **Photos**: sign in with Google and choose photos in Google's own picker (HEIC is fine, since Google sends JPEG copies). Each photo keeps the date it was taken, and the book is always sorted by that date.
 2. **Groups**: photos are grouped by the month they were taken. Rename groups, move boundaries ("← Previous group" / "Next group →"), start a new group anywhere, merge groups, exclude photos, and pick the cover photo.
 3. **Design**: set the page size (presets or custom, mm or inches), bleed, margins, spacing and photos per page (default 7–10). Choose how group names appear, plus font and colours. Use **↻ Layout** on any page to try another arrangement.
-4. **Download PDF**: one PDF, every page at trim size plus bleed, with photos at up to 300 dpi.
+4. **Download**, in one of two forms:
+   - **JPEG pages (.zip)**: one 300 dpi image per page, bleed included, to upload as full-page layouts in a printer's own editor (e.g. MILK Books). Tick "Join facing pages into spreads" for lay-flat books that need spreads.
+   - **PDF**: one file, every page at trim size plus bleed, for printers that take PDFs (e.g. Blurb).
 
 Everything stays in your browser (IndexedDB). Nothing is uploaded anywhere except the requests to Google.
 
@@ -27,6 +29,15 @@ Google only lets an app read photos you pick, through the **Google Photos Picker
 ### If downloads are blocked
 
 If importing fails with "The browser blocked the download from Google", Google isn't allowing direct browser downloads. Deploy `tools/proxy-worker.js` as a free Cloudflare Worker (instructions in the file) and set `PROXY_URL` in `js/config.js`. The worker only forwards requests to Google's photo host.
+
+## Printing with MILK Books
+
+MILK accepts custom pages as JPEGs with 3 mm bleed at 300 dpi ([their spec](https://support.milkbooks.com/knowledge/uploading)). The app has MILK size presets that match their upload sizes (e.g. Premium Large Square exports at 285.4 × 285.4 mm).
+
+- **Premium (lay-flat) books** want facing pages uploaded as one spread, so tick "Join facing pages into spreads". Only the first and last pages are single.
+- **Classic and Softcover books** take single pages only, so leave spreads off.
+- MILK designs the cover in its own editor, so you may want to turn off "Cover page with photo".
+- In MILK's Design Studio, choose a full-bleed single-photo layout for each page (or spread) and drop the images in order.
 
 ## Printing notes
 

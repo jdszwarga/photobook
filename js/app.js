@@ -3,12 +3,18 @@ import * as gp from './google.js';
 import { prepare, exifDate } from './images.js';
 import { sortPhotos, autoStarts, buildGroups, planBook, monthName } from './layout.js';
 import { exportPdf } from './pdf.js';
+import { exportJpegs } from './raster.js';
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
 const MM_PER_IN = 25.4;
 
+// MILK sizes are their custom-upload sizes minus the 3 mm bleed on each side.
 const PRESETS = [
+  ['milk-lsq', 'MILK Premium Large Square (27.9 cm)', 279.4, 279.4],
+  ['milk-msq', 'MILK Premium Medium Square (20.3 cm)', 203.2, 203.2],
+  ['milk-lland', 'MILK Premium Large Landscape', 323, 241],
+  ['milk-classic-lland', 'MILK Classic Large Landscape', 330.2, 279.4],
   ['30x30cm', '30 × 30 cm square', 300, 300],
   ['20x20cm', '20 × 20 cm square', 200, 200],
   ['12x12in', '12 × 12 in square', 304.8, 304.8],
@@ -23,7 +29,7 @@ const PRESETS = [
 
 const DEFAULT_SETTINGS = {
   title: 'Our Year', subtitle: String(new Date().getFullYear()),
-  preset: '30x30cm', width: 300, height: 300, unit: 'mm',
+  preset: 'milk-lsq', width: 279.4, height: 279.4, unit: 'mm',
   bleed: 3, margin: 12, gap: 3, evenPages: true, cover: true,
   minPer: 7, maxPer: 10, titleMode: 'header', font: 'serif', bg: '#ffffff', ink: '#222222',
 };
@@ -442,6 +448,7 @@ $('#s-preset').addEventListener('change', (e) => {
         for (const k of ['bleed', 'margin', 'gap']) s[k] = swap[s[k]] ?? s[k];
       }
       s.unit = unit;
+      if (p[0].startsWith('milk')) s.bleed = 3; // MILK uploads include exactly 3 mm bleed
     }
   });
   fillPanel();
@@ -529,35 +536,73 @@ $('#pages').addEventListener('click', (e) => {
 });
 
 // ---------- Export ----------
-$('#exportBtn').addEventListener('click', async () => {
-  const dlg = $('#exportDialog');
-  $('#exportTitle').textContent = 'Making your PDF…';
+const exportPrefs = (() => {
+  try { return JSON.parse(localStorage.getItem('photobook-export')) || {}; } catch { return {}; }
+})();
+
+$('#exportBtn').addEventListener('click', () => {
+  $('#exportChoose').hidden = false;
+  $('#exportRun').hidden = true;
+  const fmt = exportPrefs.format || 'jpeg';
+  $(`#exportChoose input[value=${fmt}]`).checked = true;
+  $('#spreadsChk').checked = !!exportPrefs.spreads;
+  syncSpreadOpt();
+  $('#exportDialog').showModal();
+});
+
+const chosenFormat = () => $('#exportChoose input[name=format]:checked').value;
+function syncSpreadOpt() {
+  $('#spreadOpt').style.opacity = chosenFormat() === 'jpeg' ? 1 : 0.4;
+  $('#spreadsChk').disabled = chosenFormat() !== 'jpeg';
+}
+$('#exportChoose').addEventListener('change', syncSpreadOpt);
+
+$('#exportChoose').addEventListener('submit', (e) => {
+  if (e.submitter?.value !== 'go') return;
+  e.preventDefault();
+  const format = chosenFormat();
+  const spreads = $('#spreadsChk').checked;
+  try { localStorage.setItem('photobook-export', JSON.stringify({ format, spreads })); } catch {}
+  Object.assign(exportPrefs, { format, spreads });
+  runExport(format, spreads);
+});
+
+async function runExport(format, spreads) {
+  $('#exportChoose').hidden = true;
+  $('#exportRun').hidden = false;
+  const isPdf = format === 'pdf';
+  $('#exportTitle').textContent = isPdf ? 'Making your PDF…' : 'Making your page images…';
   $('#exportText').textContent = 'Placing photos at print resolution. Keep this tab open.';
   $('#exportBar').style.width = '0';
   $('#exportClose').hidden = true;
-  dlg.showModal();
+  const onProgress = (f) => {
+    $('#exportBar').style.width = `${Math.round(f * 100)}%`;
+    $('#exportText').textContent = `${isPdf ? 'Placing photos' : 'Rendering pages'}… ${Math.round(f * 100)}%`;
+  };
   try {
-    if (!window.PDFLib) throw new Error('PDF library failed to load. Reload the page and try again.');
-    const blob = await exportPdf(pages(), S(), {
-      onProgress: (f) => {
-        $('#exportBar').style.width = `${Math.round(f * 100)}%`;
-        $('#exportText').textContent = `Placing photos… ${Math.round(f * 100)}%`;
-      },
-    });
+    let blob;
+    if (isPdf) {
+      if (!window.PDFLib) throw new Error('PDF library failed to load. Reload the page and try again.');
+      blob = await exportPdf(pages(), S(), { onProgress });
+    } else {
+      blob = await exportJpegs(pages(), S(), { spreads, onProgress });
+    }
+    const clean = (t) => String(t || '').replace(/[\\/:*?"<>|]+/g, '').trim();
+    const name = `${clean(S().title) || 'photobook'}${S().subtitle ? ' ' + clean(S().subtitle) : ''}${isPdf ? '.pdf' : spreads ? ' spreads.zip' : ' pages.zip'}`;
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${(S().title || 'photobook').replace(/[\\/:*?"<>|]+/g, '').trim() || 'photobook'}${S().subtitle ? ' ' + S().subtitle.replace(/[\\/:*?"<>|]+/g, '') : ''}.pdf`;
+    a.download = name;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 60_000);
-    $('#exportTitle').textContent = 'Your PDF is ready';
-    $('#exportText').textContent = `Downloaded ${a.download} (${(blob.size / 1048576).toFixed(1)} MB).`;
+    $('#exportTitle').textContent = isPdf ? 'Your PDF is ready' : 'Your page images are ready';
+    $('#exportText').textContent = `Downloaded ${name} (${(blob.size / 1048576).toFixed(1)} MB).${isPdf ? '' : ' Unzip it, then upload each image as a full-page layout, in order.'}`;
   } catch (e) {
     $('#exportTitle').textContent = 'Export failed';
     $('#exportText').textContent = e.message;
   }
   $('#exportClose').hidden = false;
-});
+}
 $('#exportClose').addEventListener('click', () => $('#exportDialog').close());
 
 // ---------- Boot ----------
