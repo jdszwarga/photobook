@@ -30,6 +30,16 @@ Google only lets an app read photos you pick, through the **Google Photos Picker
 
 If importing fails with "The browser blocked the download from Google", Google isn't allowing direct browser downloads. Deploy `tools/proxy-worker.js` as a free Cloudflare Worker (instructions in the file) and set `PROXY_URL` in `js/config.js`. The worker only forwards requests to Google's photo host.
 
+## Printing with Diamond Photo (best value, printed in NZ)
+
+[Diamond Photo](https://diamondphoto.co.nz/pages/photobooks) prints in New Zealand and delivers in about 5 working days. In Nov 2026 the 28 × 28 cm Layflat Hardcover (Standard, 300 gsm satin) was $29.92 for 20 pages, or $14.96 with their 50% code, plus $2.01 per extra page (up to 90 pages). The extra pages aren't discounted.
+
+1. In the app, pick the **Diamond Photo 28 × 28 cm (layflat)** size and download **JPEG pages** with spreads **off**.
+2. In Diamond Photo's editor, start the 28 × 28 Layflat Hardcover and add enough pages.
+3. Use a single-photo, full-page layout on each page and drop the images in, in order. Design the cover in their editor.
+
+Diamond Photo doesn't publish bleed specs for its editor. The app's 12 mm margins keep photos well clear of the edge, so a small crop from their editor won't touch your photos. Check the preview before ordering.
+
 ## Printing with MILK Books
 
 MILK accepts custom pages as JPEGs with 3 mm bleed at 300 dpi ([their spec](https://support.milkbooks.com/knowledge/uploading)). The app has MILK size presets that match their upload sizes (e.g. Premium Large Square exports at 285.4 × 285.4 mm).

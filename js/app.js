@@ -9,8 +9,13 @@ const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
 const MM_PER_IN = 25.4;
 
+// Diamond Photo / Kroma: nominal trim sizes from their range.
 // MILK sizes are their custom-upload sizes minus the 3 mm bleed on each side.
 const PRESETS = [
+  ['dp-28sq', 'Diamond Photo 28 × 28 cm (layflat)', 280, 280],
+  ['dp-30sq', 'Diamond Photo 30 × 30 cm (classic)', 300, 300],
+  ['dp-28x20', 'Diamond Photo 28 × 20 cm landscape', 280, 200],
+  ['dp-20sq', 'Diamond Photo 20 × 20 cm', 200, 200],
   ['milk-lsq', 'MILK Premium Large Square (27.9 cm)', 279.4, 279.4],
   ['milk-msq', 'MILK Premium Medium Square (20.3 cm)', 203.2, 203.2],
   ['milk-lland', 'MILK Premium Large Landscape', 323, 241],
@@ -29,7 +34,7 @@ const PRESETS = [
 
 const DEFAULT_SETTINGS = {
   title: 'Our Year', subtitle: String(new Date().getFullYear()),
-  preset: 'milk-lsq', width: 279.4, height: 279.4, unit: 'mm',
+  preset: 'dp-28sq', width: 280, height: 280, unit: 'mm',
   bleed: 3, margin: 12, gap: 3, evenPages: true, cover: true,
   minPer: 7, maxPer: 10, titleMode: 'header', font: 'serif', bg: '#ffffff', ink: '#222222',
 };
