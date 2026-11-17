@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Photobook</title>
+  <meta name="description" content="Turn a year of Google Photos into a print-ready photo book PDF.">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/app.css">
+  <script src="js/vendor/pdf-lib.min.js" defer></script>
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><img src="icons/icon.svg" alt="" width="26" height="26"><span>Photobook</span></div>
+    <nav class="steps" aria-label="Steps">
+      <button data-step="photos" class="step"><span class="num">1</span>Photos</button>
+      <span class="step-line"></span>
+      <button data-step="groups" class="step"><span class="num">2</span>Groups</button>
+      <span class="step-line"></span>
+      <button data-step="design" class="step"><span class="num">3</span>Design</button>
+    </nav>
+    <div class="top-actions">
+      <button id="exportBtn" class="btn primary" disabled>
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 3v12m0 0l-5-5m5 5l5-5M4 19h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Download PDF
+      </button>
+    </div>
+  </header>
+
+  <main>
+    <!-- 1. Photos -->
+    <section id="view-photos" class="view">
+      <div class="import-card">
+        <h1 id="importTitle">Start with your year in photos</h1>
+        <p id="importLead" class="lead">Pick photos from Google Photos. They're sorted by the date each one was taken, so the book always runs January to December.</p>
+        <div id="importSummary" class="summary" hidden></div>
+        <div class="import-actions">
+          <button id="googleBtn" class="btn primary large">
+            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="#fff" d="M12 2a5 5 0 0 1 5 5v5h-5a5 5 0 0 1 0-10zm0 20a5 5 0 0 1-5-5v-5h5a5 5 0 0 1 0 10zM2 12a5 5 0 0 1 5-5h5v5a5 5 0 0 1-10 0zm20 0a5 5 0 0 1-5 5h-5v-5a5 5 0 0 1 10 0z" opacity=".95"/></svg>
+            <span>Choose from Google Photos</span>
+          </button>
+          <label class="btn ghost">
+            <input id="fileInput" type="file" accept="image/jpeg,image/png,image/webp" multiple hidden>
+            Add from this computer
+          </label>
+        </div>
+        <p id="googleNote" class="note" hidden></p>
+        <div id="progress" class="progress" hidden>
+          <div class="progress-text"><span id="progressText"></span><button id="cancelBtn" class="link">Cancel</button></div>
+          <div class="bar"><div id="progressBar"></div></div>
+        </div>
+        <div id="importErrors" class="errors" hidden></div>
+        <div class="import-foot" id="importFoot" hidden>
+          <button id="clearBtn" class="link danger">Start over</button>
+          <button class="btn dark" data-goto="groups">Next: Groups →</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2. Groups -->
+    <section id="view-groups" class="view" hidden>
+      <div class="view-head">
+        <div>
+          <h2>Groups</h2>
+          <p class="muted">Each group starts on a new page with its name as a heading. Click a photo to move a group boundary, exclude it, or make it the cover.</p>
+        </div>
+        <div class="head-actions">
+          <button id="resetGroupsBtn" class="btn ghost">Reset to months</button>
+          <button class="btn dark" data-goto="design">Next: Design →</button>
+        </div>
+      </div>
+      <div id="groupList" class="group-list"></div>
+      <div id="selBar" class="sel-bar" hidden>
+        <img id="selThumb" alt="">
+        <div class="sel-info"><strong id="selDate"></strong><span id="selName"></span></div>
+        <div class="sel-actions">
+          <button data-act="prev" title="Move this photo (and earlier ones in its group) to the previous group">← Previous group</button>
+          <button data-act="start" title="Start a new group with this photo">New group here</button>
+          <button data-act="next" title="Move this photo (and later ones in its group) to the next group">Next group →</button>
+          <button data-act="exclude" id="excludeBtn">Exclude</button>
+          <button data-act="cover">Use as cover</button>
+        </div>
+        <button class="icon-btn" data-act="close" aria-label="Close">✕</button>
+      </div>
+    </section>
+
+    <!-- 3. Design -->
+    <section id="view-design" class="view design" hidden>
+      <aside class="panel">
+        <div class="field-group">
+          <h3>Book</h3>
+          <label>Title<input id="s-title" type="text"></label>
+          <label>Subtitle<input id="s-subtitle" type="text"></label>
+          <label class="check"><input id="s-cover" type="checkbox"> Cover page with photo</label>
+        </div>
+        <div class="field-group">
+          <h3>Size</h3>
+          <label>Page size<select id="s-preset"></select></label>
+          <div class="row2">
+            <label>Width<input id="s-width" type="number" step="any" min="50"></label>
+            <label>Height<input id="s-height" type="number" step="any" min="50"></label>
+          </div>
+          <div class="seg" id="s-unit" role="radiogroup" aria-label="Units">
+            <button data-v="mm">mm</button><button data-v="in">inches</button>
+          </div>
+          <div class="row3">
+            <label>Bleed<input id="s-bleed" type="number" step="any" min="0"></label>
+            <label>Margin<input id="s-margin" type="number" step="any" min="0"></label>
+            <label>Spacing<input id="s-gap" type="number" step="any" min="0"></label>
+          </div>
+          <label class="check"><input id="s-even" type="checkbox"> Even number of pages</label>
+        </div>
+        <div class="field-group">
+          <h3>Layout</h3>
+          <div class="row2">
+            <label>Min photos / page<input id="s-min" type="number" min="1" max="12"></label>
+            <label>Max photos / page<input id="s-max" type="number" min="1" max="12"></label>
+          </div>
+          <label>Group names
+            <select id="s-titleMode">
+              <option value="header">Heading on the group's first page</option>
+              <option value="divider">Separate title page</option>
+              <option value="none">Don't show</option>
+            </select>
+          </label>
+          <div class="seg" id="s-font" role="radiogroup" aria-label="Font">
+            <button data-v="serif" class="serif">Serif</button><button data-v="sans" class="sans">Sans</button>
+          </div>
+          <div class="row2">
+            <label>Background<input id="s-bg" type="color"></label>
+            <label>Text<input id="s-ink" type="color"></label>
+          </div>
+        </div>
+        <p id="bookStats" class="stats"></p>
+      </aside>
+      <div class="canvas">
+        <div id="pages" class="pages"></div>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="exportDialog">
+    <h3 id="exportTitle">Making your PDF…</h3>
+    <p id="exportText" class="muted"></p>
+    <div class="bar"><div id="exportBar"></div></div>
+    <div class="dialog-actions"><button id="exportClose" class="btn ghost" hidden>Close</button></div>
+  </dialog>
+
+  <div id="toast" class="toast" hidden></div>
+</body>
+</html>
