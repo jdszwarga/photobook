@@ -21,7 +21,7 @@ async function tx(store, mode, fn) {
   return new Promise((resolve, reject) => {
     const t = d.transaction(store, mode);
     const out = fn(t.objectStore(store));
-    t.oncomplete = () => resolve(out?.result ?? out);
+    t.oncomplete = () => resolve(out instanceof IDBRequest ? out.result : out);
     t.onerror = () => reject(t.error);
     t.onabort = () => reject(t.error);
   });

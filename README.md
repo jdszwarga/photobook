@@ -4,10 +4,14 @@ A web app that turns a year of Google Photos into print-ready photo book pages (
 
 1. **Photos**: sign in with Google and choose photos in Google's own picker (HEIC is fine, since Google sends JPEG copies). Each photo keeps the date it was taken, and the book is always sorted by that date.
 2. **Groups**: photos are grouped by the month they were taken. Rename groups, move boundaries ("← Previous group" / "Next group →"), start a new group anywhere, merge groups, exclude photos, and pick the cover photo.
-3. **Design**: set the page size (presets or custom, mm or inches), bleed, margins, spacing and photos per page (default 7–10). Choose how group names appear, plus font and colours. Use **↻ Layout** on any page to try another arrangement.
+3. **Design**: set the page size (presets or custom, mm or inches), bleed, margins, spacing and photos per page (default 7–10). Choose how group names appear, plus the font (12 Google Fonts), weight, case, letter spacing, colours, photo corners and borders. Use **↻ Layout** on any page to try another arrangement.
+   - **Covers**: in Groups, select a photo and choose **Front cover** or **Back cover**. Pick a front layout (full-bleed photo with title, framed, photo + title band, or small centred photo) and a back layout, plus a line of back-cover text.
+   - **Design with Claude**: connect your Claude API key (stored only in your browser), optionally add an inspiration image and a short brief, and Claude picks the fonts, colours, spacing and cover layouts from your photos. **Undo** puts your previous design back. Each design sends about a dozen small images and costs a few cents.
 4. **Download**, in one of two forms:
-   - **JPEG pages (.zip)**: one 300 dpi image per page, bleed included, to upload as full-page layouts in a printer's own editor (e.g. MILK Books). Tick "Join facing pages into spreads" for lay-flat books that need spreads.
-   - **PDF**: one file, every page at trim size plus bleed, for printers that take PDFs (e.g. Blurb).
+   - **JPEG pages (.zip)**: one 300 dpi image per page, bleed included, plus `Cover - front.jpg` and `Cover - back.jpg`, to upload as full-page layouts in a printer's own editor. Tick "Join facing pages into spreads" for lay-flat books that need spreads.
+   - **PDF**: the inside pages at trim size plus bleed, for printers that take PDFs (e.g. Blurb). Covers aren't included.
+
+Everything you see in the preview is drawn by the same renderer as the downloads, so what you see is what prints.
 
 Everything stays in your browser (IndexedDB). Nothing is uploaded anywhere except the requests to Google.
 
@@ -36,7 +40,8 @@ If importing fails with "The browser blocked the download from Google", Google i
 
 1. In the app, pick the **Diamond Photo 28 × 28 cm (layflat)** size and download **JPEG pages** with spreads **off**.
 2. In Diamond Photo's editor, start the 28 × 28 Layflat Hardcover and add enough pages.
-3. Use a single-photo, full-page layout on each page and drop the images in, in order. Design the cover in their editor.
+3. Use a single-photo, full-page layout on each page and drop the images in, in order.
+4. For the cover, drop `Cover - front.jpg` and `Cover - back.jpg` into full-cover photo slots. Hardcovers wrap around the board, so their editor may trim more off the cover edges than off the pages. Keep the title away from the edges and check the cover preview.
 
 Diamond Photo doesn't publish bleed specs for its editor. The app's 12 mm margins keep photos well clear of the edge, so a small crop from their editor won't touch your photos. Check the preview before ordering.
 
@@ -64,4 +69,4 @@ node tools/serve.mjs 5180
 
 Then open <http://localhost:5180>. "Add from this computer" (JPEG/PNG, dated from EXIF) is there for testing without Google.
 
-Files: `js/google.js` (Picker API), `js/layout.js` (grouping and page layouts), `js/pdf.js` (export, using the vendored `js/vendor/pdf-lib.min.js`), `js/app.js` (UI), `js/store.js` (IndexedDB).
+Files: `js/google.js` (Picker API), `js/layout.js` (grouping and page layouts), `js/render.js` (draws pages and covers for preview and export), `js/pdf.js` (PDF and JPEG export, using the vendored `js/vendor/pdf-lib.min.js`), `js/ai.js` (Claude design), `js/app.js` (UI), `js/store.js` (IndexedDB).

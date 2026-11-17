@@ -2,8 +2,9 @@ import * as store from './store.js';
 import * as gp from './google.js';
 import { prepare, exifDate } from './images.js';
 import { sortPhotos, autoStarts, buildGroups, planBook, monthName } from './layout.js';
-import { exportPdf } from './pdf.js';
-import { exportJpegs } from './raster.js';
+import { exportPdf, exportJpegs } from './pdf.js';
+import { renderSheet, ensureFonts, thumbSource, forgetThumbs, FONTS, FONT_NAMES } from './render.js';
+import * as ai from './ai.js';
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
@@ -35,15 +36,20 @@ const PRESETS = [
 const DEFAULT_SETTINGS = {
   title: 'Our Year', subtitle: String(new Date().getFullYear()),
   preset: 'dp-28sq', width: 280, height: 280, unit: 'mm',
-  bleed: 3, margin: 12, gap: 3, evenPages: true, cover: true,
-  minPer: 7, maxPer: 10, titleMode: 'header', font: 'serif', bg: '#ffffff', ink: '#222222',
+  bleed: 3, margin: 12, gap: 3, evenPages: true, cover: false,
+  minPer: 7, maxPer: 10, titleMode: 'header',
+  font: 'Fraunces', titleWeight: 600, titleCase: 'none', titleAlign: 'center', titleScale: 1, titleTracking: 0, titleRule: false,
+  bg: '#ffffff', ink: '#222222', accent: '#c2562d', radius: 0, stroke: 0, strokeColor: '#ffffff',
+  front: { photoId: null, layout: 'full', titlePos: 'bottom', overlay: 0.35, textColor: '#ffffff' },
+  back: { photoId: null, layout: 'small', text: '' },
 };
+const freshSettings = () => structuredClone(DEFAULT_SETTINGS);
 
 // ---------- State ----------
 const state = {
   step: 'photos',
   photos: [], // sorted metadata incl. thumb blob
-  project: { settings: { ...DEFAULT_SETTINGS }, starts: null, excluded: new Set(), shuffles: {}, coverId: null },
+  project: { settings: freshSettings(), starts: null, excluded: new Set(), shuffles: {} },
   selected: null,
 };
 const thumbUrls = new Map();
@@ -64,7 +70,13 @@ function save() {
 async function load() {
   const saved = await store.getKV('project');
   if (saved) {
-    state.project = { ...state.project, ...saved, settings: { ...DEFAULT_SETTINGS, ...saved.settings }, excluded: new Set(saved.excluded || []) };
+    const d = freshSettings(), ss = saved.settings || {};
+    const settings = { ...d, ...ss, front: { ...d.front, ...ss.front }, back: { ...d.back, ...ss.back } };
+    // older saves: 'serif'/'sans' fonts and a single cover photo
+    if (!FONTS[settings.font]) settings.font = settings.font === 'sans' ? 'Inter' : 'Fraunces';
+    if (saved.coverId && !settings.front.photoId) settings.front.photoId = saved.coverId;
+    delete saved.coverId;
+    state.project = { ...state.project, ...saved, settings, excluded: new Set(saved.excluded || []) };
   }
   state.photos = sortPhotos(await store.allPhotoMeta());
 }
@@ -72,6 +84,19 @@ async function load() {
 const starts = () => state.project.starts ?? autoStarts(state.photos);
 const groups = () => buildGroups(state.photos, starts());
 const pages = () => planBook(groups(), state.project);
+
+// Cover photos default to the first and last photos in the book.
+function coverIds() {
+  const f = state.project.settings.front, b = state.project.settings.back;
+  const has = (id) => id && state.photos.some((p) => p.id === id);
+  const visible = state.photos.filter((p) => !state.project.excluded.has(p.id));
+  return { front: has(f.photoId) ? f.photoId : visible[0]?.id ?? null, back: has(b.photoId) ? b.photoId : visible.at(-1)?.id ?? null };
+}
+// Settings with cover photo ids resolved, as the renderer needs them.
+function renderSettings() {
+  const s = state.project.settings, c = coverIds();
+  return { ...s, front: { ...s.front, photoId: c.front }, back: { ...s.back, photoId: c.back } };
+}
 
 // ---------- Navigation ----------
 function go(step) {
@@ -254,7 +279,8 @@ $('#clearBtn').addEventListener('click', async () => {
   thumbUrls.forEach((u) => URL.revokeObjectURL(u));
   thumbUrls.clear();
   state.photos = [];
-  state.project = { settings: { ...DEFAULT_SETTINGS }, starts: null, excluded: new Set(), shuffles: {}, coverId: null };
+  state.project = { settings: freshSettings(), starts: null, excluded: new Set(), shuffles: {} };
+  forgetThumbs();
   $('#importErrors').hidden = true;
   go('photos');
 });
@@ -265,7 +291,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 function renderGroups() {
   const gs = groups();
   const ex = state.project.excluded;
-  const coverId = state.project.coverId ?? state.photos[0]?.id;
+  const cov = coverIds();
   $('#groupList').innerHTML = gs.map((g, gi) => {
     const inBook = g.photos.filter((p) => !ex.has(p.id)).length;
     const range = `${fmtDate(g.photos[0].createTime)} – ${fmtDate(g.photos.at(-1).createTime)}`;
@@ -275,7 +301,7 @@ function renderGroups() {
         <span class="group-meta">${inBook} photo${inBook === 1 ? '' : 's'}${inBook !== g.photos.length ? ` (${g.photos.length - inBook} excluded)` : ''} · ${range}</span>
         ${gi > 0 ? `<button class="link" data-merge="${gi}">Merge into ${esc(gs[gi - 1].name)}</button>` : ''}
       </div>
-      <div class="thumbs">${g.photos.map((p) => `<button class="thumb${ex.has(p.id) ? ' excluded' : ''}${p.id === coverId && state.project.settings.cover ? ' cover' : ''}${p.id === state.selected ? ' selected' : ''}" data-id="${esc(p.id)}" title="${esc(p.filename)}"><img loading="lazy" src="${thumbUrl(p)}" alt=""><span class="date">${fmtDate(p.createTime)}</span></button>`).join('')}</div>
+      <div class="thumbs">${g.photos.map((p) => `<button class="thumb${ex.has(p.id) ? ' excluded' : ''}${p.id === cov.front ? ' cover' : p.id === cov.back ? ' cover-back' : ''}${p.id === state.selected ? ' selected' : ''}" data-id="${esc(p.id)}" title="${esc(p.filename)}"><img loading="lazy" src="${thumbUrl(p)}" alt=""><span class="date">${fmtDate(p.createTime)}</span></button>`).join('')}</div>
     </section>`;
   }).join('');
   renderSelBar();
@@ -340,7 +366,6 @@ function renderSelBar() {
   bar.querySelector('[data-act=start]').disabled = loc.pi === 0;
   bar.querySelector('[data-act=next]').disabled = loc.gi === loc.gs.length - 1 && loc.pi === 0;
   $('#excludeBtn').textContent = state.project.excluded.has(p.id) ? 'Include' : 'Exclude';
-  bar.querySelector('[data-act=cover]').hidden = !state.project.settings.cover;
 }
 
 $('#selBar').addEventListener('click', (e) => {
@@ -376,11 +401,11 @@ $('#selBar').addEventListener('click', (e) => {
     state.project.shuffles = {};
     save();
     renderGroups();
-  } else if (act === 'cover') {
-    state.project.coverId = id;
+  } else if (act === 'front' || act === 'back') {
+    state.project.settings[act].photoId = id;
     save();
     renderGroups();
-    toast('Cover photo set');
+    toast(act === 'front' ? 'Front cover photo set' : 'Back cover photo set');
   }
 });
 
@@ -408,6 +433,13 @@ const fromUnit = (v) => (S().unit === 'in' ? v * MM_PER_IN : v);
 
 $('#s-preset').innerHTML = PRESETS.map(([k, label]) => `<option value="${k}">${label}</option>`).join('');
 
+const WEIGHT_NAMES = { 400: 'Regular', 600: 'Semibold', 700: 'Bold' };
+$('#s-font').innerHTML = FONT_NAMES.map((f) => `<option value="${f}" style="font-family:'${f}'">${f}</option>`).join('');
+$('#c-model').innerHTML = ai.MODELS.map((m) => `<option value="${m.id}">${m.label}</option>`).join('');
+
+const nearestWeight = (s) => FONTS[s.font].weights.reduce((b, w) => (Math.abs(w - s.titleWeight) < Math.abs(b - s.titleWeight) ? w : b));
+const setSeg = (id, v) => $$(`${id} button`).forEach((b) => b.classList.toggle('on', b.dataset.v === v));
+
 function fillPanel() {
   const s = S();
   $('#s-title').value = s.title;
@@ -415,15 +447,37 @@ function fillPanel() {
   $('#s-cover').checked = s.cover;
   $('#s-even').checked = s.evenPages;
   $('#s-preset').value = s.preset;
-  for (const k of ['width', 'height', 'bleed', 'margin', 'gap']) $(`#s-${k}`).value = toUnit(s[k]);
-  for (const k of ['width', 'height', 'bleed', 'margin', 'gap']) $(`#s-${k}`).step = s.unit === 'in' ? '0.125' : '1';
+  for (const k of ['width', 'height', 'bleed', 'margin', 'gap']) {
+    $(`#s-${k}`).value = toUnit(s[k]);
+    $(`#s-${k}`).step = s.unit === 'in' ? '0.125' : '1';
+  }
   $('#s-min').value = s.minPer;
   $('#s-max').value = s.maxPer;
   $('#s-titleMode').value = s.titleMode;
-  $('#s-bg').value = s.bg;
-  $('#s-ink').value = s.ink;
-  $$('#s-unit button').forEach((b) => b.classList.toggle('on', b.dataset.v === s.unit));
-  $$('#s-font button').forEach((b) => b.classList.toggle('on', b.dataset.v === s.font));
+  $('#s-font').value = s.font;
+  $('#s-font').style.fontFamily = `'${s.font}'`;
+  $('#s-weight').innerHTML = FONTS[s.font].weights.map((w) => `<option value="${w}">${WEIGHT_NAMES[w]}</option>`).join('');
+  $('#s-weight').value = String(nearestWeight(s));
+  setSeg('#s-unit', s.unit);
+  setSeg('#s-case', s.titleCase);
+  setSeg('#s-align', s.titleAlign);
+  $('#s-scale').value = s.titleScale;
+  $('#s-tracking').value = s.titleTracking;
+  $('#s-rule').checked = s.titleRule;
+  for (const k of ['bg', 'ink', 'accent', 'strokeColor']) $(`#s-${k}`).value = s[k];
+  $('#s-radius').value = s.radius;
+  $('#s-stroke').value = s.stroke;
+  $('#f-layout').value = s.front.layout;
+  $('#f-pos').value = s.front.titlePos;
+  $('#f-overlay').value = s.front.overlay;
+  $('#f-text').value = s.front.textColor;
+  $('#b-layout').value = s.back.layout;
+  $('#b-text').value = s.back.text;
+  const c = coverIds();
+  const byId = (id) => state.photos.find((p) => p.id === id);
+  $('#frontThumb').src = c.front ? thumbUrl(byId(c.front)) : '';
+  $('#backThumb').src = c.back ? thumbUrl(byId(c.back)) : '';
+  fillClaude();
 }
 
 function setting(fn) {
@@ -431,14 +485,40 @@ function setting(fn) {
   save();
   renderPagesSoon();
 }
+const bind = (sel, ev, fn) => $(sel).addEventListener(ev, (e) => setting((s) => fn(s, e.target)));
 
-$('#s-title').addEventListener('input', (e) => setting((s) => (s.title = e.target.value)));
-$('#s-subtitle').addEventListener('input', (e) => setting((s) => (s.subtitle = e.target.value)));
-$('#s-cover').addEventListener('change', (e) => setting((s) => (s.cover = e.target.checked)));
-$('#s-even').addEventListener('change', (e) => setting((s) => (s.evenPages = e.target.checked)));
-$('#s-titleMode').addEventListener('change', (e) => setting((s) => (s.titleMode = e.target.value)));
-$('#s-bg').addEventListener('input', (e) => setting((s) => (s.bg = e.target.value)));
-$('#s-ink').addEventListener('input', (e) => setting((s) => (s.ink = e.target.value)));
+bind('#s-title', 'input', (s, t) => (s.title = t.value));
+bind('#s-subtitle', 'input', (s, t) => (s.subtitle = t.value));
+bind('#s-cover', 'change', (s, t) => (s.cover = t.checked));
+bind('#s-even', 'change', (s, t) => (s.evenPages = t.checked));
+bind('#s-titleMode', 'change', (s, t) => (s.titleMode = t.value));
+bind('#s-weight', 'change', (s, t) => (s.titleWeight = +t.value));
+bind('#s-scale', 'input', (s, t) => (s.titleScale = +t.value));
+bind('#s-tracking', 'input', (s, t) => (s.titleTracking = +t.value));
+bind('#s-rule', 'change', (s, t) => (s.titleRule = t.checked));
+for (const k of ['bg', 'ink', 'accent', 'strokeColor']) bind(`#s-${k}`, 'input', (s, t) => (s[k] = t.value));
+bind('#s-radius', 'input', (s, t) => (s.radius = +t.value));
+bind('#s-stroke', 'input', (s, t) => (s.stroke = +t.value));
+bind('#f-layout', 'change', (s, t) => (s.front.layout = t.value));
+bind('#f-pos', 'change', (s, t) => (s.front.titlePos = t.value));
+bind('#f-overlay', 'input', (s, t) => (s.front.overlay = +t.value));
+bind('#f-text', 'input', (s, t) => (s.front.textColor = t.value));
+bind('#b-layout', 'change', (s, t) => (s.back.layout = t.value));
+bind('#b-text', 'input', (s, t) => (s.back.text = t.value));
+$('#s-font').addEventListener('change', (e) => {
+  setting((s) => {
+    s.font = e.target.value;
+    s.titleWeight = nearestWeight(s);
+  });
+  fillPanel();
+});
+for (const [id, key] of [['#s-case', 'titleCase'], ['#s-align', 'titleAlign']]) {
+  $(id).addEventListener('click', (e) => {
+    const v = e.target.closest('button')?.dataset.v;
+    if (v) { setting((s) => (s[key] = v)); setSeg(id, v); }
+  });
+}
+
 $('#s-preset').addEventListener('change', (e) => {
   const p = PRESETS.find((x) => x[0] === e.target.value);
   setting((s) => {
@@ -481,11 +561,7 @@ for (const [id, key] of [['#s-min', 'minPer'], ['#s-max', 'maxPer']]) {
 }
 $('#s-unit').addEventListener('click', (e) => {
   const v = e.target.closest('button')?.dataset.v;
-  if (v) { S().unit = v; save(); fillPanel(); }
-});
-$('#s-font').addEventListener('click', (e) => {
-  const v = e.target.closest('button')?.dataset.v;
-  if (v) { setting((s) => (s.font = v)); fillPanel(); }
+  if (v) { S().unit = v; save(); fillPanel(); renderPagesSoon(); }
 });
 
 function renderDesign() {
@@ -496,39 +572,43 @@ function renderDesign() {
 let renderTimer;
 function renderPagesSoon() {
   clearTimeout(renderTimer);
-  renderTimer = setTimeout(renderPages, 120);
+  renderTimer = setTimeout(renderPages, 150);
 }
 
-function renderPages() {
-  const s = S();
+// Preview: every page is drawn by the same renderer as the export, using thumbnails.
+const previewSource = thumbSource(async (id) => state.photos.find((p) => p.id === id)?.thumb);
+let renderGen = 0;
+
+async function renderPages() {
+  const gen = ++renderGen;
+  const s = renderSettings();
   const ps = pages();
   const container = $('#pages');
-  const maxSide = 300;
-  const scale = maxSide / Math.max(s.width, s.height); // px per mm
-  const pw = s.width * scale, ph = s.height * scale;
+  const k = 300 / Math.max(s.width, s.height); // px per mm on screen
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const pw = s.width * k, ph = s.height * k;
   container.style.setProperty('--page-w', `${pw}px`);
-  const fontFamily = s.font === 'sans' ? 'Helvetica, Arial, sans-serif' : "'Times New Roman', Times, serif";
-  const byId = new Map(state.photos.map((p) => [p.id, p]));
-  const px = (mm) => `${(mm * scale).toFixed(2)}px`;
-  const text = (t, size, baselineY) => t ? `<div class="ptitle" style="top:${px(baselineY - size * 0.8)};font-size:${px(size)};color:${s.ink};font-family:${fontFamily}">${esc(t)}</div>` : '';
+  const pageBox = (id) => `<div class="page" style="width:${pw}px;height:${ph}px"><canvas data-page="${id}"></canvas></div>`;
 
-  container.innerHTML = ps.length ? ps.map((p, i) => {
-    let inner = (p.cells || []).map((c) => {
-      const ph_ = byId.get(c.photoId);
-      return `<div class="cell" style="left:${px(c.x)};top:${px(c.y)};width:${px(c.w)};height:${px(c.h)}"><img src="${ph_ ? thumbUrl(ph_) : ''}" alt="" loading="lazy"></div>`;
-    }).join('');
-    if (p.type === 'cover') inner += text(p.title, p.titleSize, p.titleY) + text(p.subtitle, p.titleSize * 0.5, p.titleY + p.titleSize * 1.05);
-    else if (p.type === 'divider') inner += text(p.title, p.titleSize, s.height / 2 + p.titleSize * 0.35);
-    else if (p.title) inner += text(p.title, p.titleSize, p.titleY);
-    const label = p.type === 'cover' ? 'Cover' : p.type === 'blank' ? 'Blank (for even page count)' : `${p.group}`;
+  const coverRow = `<div class="cover-row"><div class="spread">${pageBox('back')}${pageBox('front')}</div>
+    <div class="page-label"><span>Back cover</span><span>Front cover</span></div></div>`;
+  container.innerHTML = ps.length ? coverRow + ps.map((p, i) => {
+    const label = p.type === 'title' ? 'Title page' : p.type === 'blank' ? 'Blank (for even page count)' : `${p.group}`;
     const shuffle = p.type === 'photos' && p.variants > 1 ? `<button data-shuffle="${esc(p.key)}" title="Try another arrangement">↻ Layout</button>` : '';
-    return `<div class="page-wrap"><div class="page" style="width:${pw}px;height:${ph}px;background:${s.bg}">${inner}</div>
-      <div class="page-label"><span>${i + 1} · ${esc(label)}</span>${shuffle}</div></div>`;
+    return `<div class="page-wrap">${pageBox(i)}<div class="page-label"><span>${i + 1} · ${esc(label)}</span>${shuffle}</div></div>`;
   }).join('') : '<p class="empty">No photos in the book yet.</p>';
 
   const photoCount = ps.reduce((n, p) => n + (p.type === 'photos' ? p.cells.length : 0), 0);
   const unit = s.unit === 'in' ? 'in' : 'mm';
-  $('#bookStats').innerHTML = `<strong>${ps.length} pages</strong> · ${photoCount} photos<br>Export size ${toUnit(s.width + 2 * s.bleed)} × ${toUnit(s.height + 2 * s.bleed)} ${unit} (trim + bleed)`;
+  $('#bookStats').innerHTML = `<strong>${ps.length} pages</strong> + cover · ${photoCount} photos<br>Export size ${toUnit(s.width + 2 * s.bleed)} × ${toUnit(s.height + 2 * s.bleed)} ${unit} (trim + bleed)`;
+
+  await ensureFonts(s);
+  for (const canvas of $$('#pages canvas')) {
+    if (gen !== renderGen) return; // a newer render started
+    const id = canvas.dataset.page;
+    const page = id === 'front' || id === 'back' ? { type: id } : ps[+id];
+    await renderSheet([page], s, { k: k * dpr, bleed: 0, source: previewSource, canvas });
+  }
 }
 
 $('#pages').addEventListener('click', (e) => {
@@ -538,6 +618,122 @@ $('#pages').addEventListener('click', (e) => {
   sh[b.dataset.shuffle] = (sh[b.dataset.shuffle] || 0) + 1;
   save();
   renderPages();
+});
+
+// ---------- Claude ----------
+let editingClaude = false;
+let inspiration = null; // Blob
+let beforeClaude = null; // settings snapshot for undo
+
+function fillClaude() {
+  const connected = ai.isConnected();
+  $('#claudeSetup').hidden = connected && !editingClaude;
+  $('#claudeReady').hidden = !connected || editingClaude;
+  $('#c-model').value = ai.getPrefs().model;
+  $('#c-cancel').hidden = !connected;
+  $('#c-forget').hidden = !connected;
+  $('#c-key').placeholder = connected ? 'Saved. Leave blank to keep it' : 'sk-ant-…';
+  $('#c-brief').value = state.project.brief || '';
+  const has = !!inspiration;
+  $('#inspImg').hidden = !has;
+  $('#inspEmpty').hidden = has;
+  $('#inspRemove').hidden = !has;
+}
+
+$('#c-save').addEventListener('click', () => {
+  const key = $('#c-key').value.trim();
+  if (!key && !ai.isConnected()) return toast('Paste your Claude API key first.');
+  if (key && !key.startsWith('sk-ant-')) return toast('That doesn’t look like a Claude API key (it should start with sk-ant-).');
+  ai.setPrefs({ ...(key ? { apiKey: key } : {}), model: $('#c-model').value });
+  $('#c-key').value = '';
+  editingClaude = false;
+  fillClaude();
+  toast('Claude connected');
+});
+$('#c-settings').addEventListener('click', () => { editingClaude = true; fillClaude(); });
+$('#c-cancel').addEventListener('click', () => { editingClaude = false; fillClaude(); });
+$('#c-forget').addEventListener('click', () => {
+  ai.setPrefs({ apiKey: '' });
+  editingClaude = false;
+  fillClaude();
+  toast('Key removed from this browser');
+});
+$('#c-brief').addEventListener('input', (e) => { state.project.brief = e.target.value; save(); });
+
+$('#inspBox').addEventListener('click', () => $('#inspInput').click());
+$('#inspInput').addEventListener('change', async (e) => {
+  const f = e.target.files[0];
+  e.target.value = '';
+  if (!f) return;
+  try {
+    const { full } = await prepare(f, { maxFull: 1200, thumbSize: 64 });
+    inspiration = full;
+    await store.setKV('inspiration', full);
+    $('#inspImg').src = URL.createObjectURL(full);
+    fillClaude();
+  } catch {
+    toast(/hei[cf]/i.test(f.name) ? 'HEIC images can’t be read here. Use a JPEG or PNG screenshot.' : 'That image couldn’t be read.');
+  }
+});
+$('#inspRemove').addEventListener('click', async () => {
+  inspiration = null;
+  await store.setKV('inspiration', null);
+  fillClaude();
+});
+
+function sampleThumbs(n, skip) {
+  const pool = state.photos.filter((p) => !state.project.excluded.has(p.id) && !skip.includes(p.id));
+  if (pool.length <= n) return pool.map((p) => p.thumb);
+  return Array.from({ length: n }, (_, i) => pool[Math.round((i * (pool.length - 1)) / (n - 1))].thumb);
+}
+
+$('#c-go').addEventListener('click', async () => {
+  const btn = $('#c-go');
+  if (btn.disabled) return;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spark">✦</span> Claude is designing…';
+  $('#c-result').hidden = true;
+  try {
+    const rs = renderSettings();
+    const thumbOf = (id) => state.photos.find((p) => p.id === id)?.thumb || null;
+    const { rationale, patch } = await ai.designBook({
+      settings: rs,
+      groups: groups().map((g) => g.name),
+      pageCount: pages().length,
+      photoCount: state.photos.length - state.project.excluded.size,
+      front: thumbOf(rs.front.photoId),
+      back: thumbOf(rs.back.photoId),
+      samples: sampleThumbs(8, [rs.front.photoId, rs.back.photoId]),
+      inspiration,
+      brief: state.project.brief || '',
+    });
+    beforeClaude = structuredClone(S());
+    const cur = S();
+    Object.assign(cur, patch, { front: { ...cur.front, ...patch.front }, back: { ...cur.back, ...patch.back } });
+    save();
+    fillPanel();
+    renderPages();
+    $('#c-note').textContent = rationale || 'Here’s a new design.';
+    $('#c-result').hidden = false;
+    $('#c-undo').hidden = false;
+  } catch (e) {
+    $('#c-note').textContent = e.message;
+    $('#c-result').hidden = false;
+    $('#c-undo').hidden = true;
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<span class="spark">✦</span> Design my book';
+  }
+});
+$('#c-undo').addEventListener('click', () => {
+  if (!beforeClaude) return;
+  state.project.settings = beforeClaude;
+  beforeClaude = null;
+  save();
+  fillPanel();
+  renderPages();
+  $('#c-result').hidden = true;
+  toast('Back to your previous design');
 });
 
 // ---------- Export ----------
@@ -551,14 +747,16 @@ $('#exportBtn').addEventListener('click', () => {
   const fmt = exportPrefs.format || 'jpeg';
   $(`#exportChoose input[value=${fmt}]`).checked = true;
   $('#spreadsChk').checked = !!exportPrefs.spreads;
+  $('#coversChk').checked = exportPrefs.covers !== false;
   syncSpreadOpt();
   $('#exportDialog').showModal();
 });
 
 const chosenFormat = () => $('#exportChoose input[name=format]:checked').value;
 function syncSpreadOpt() {
-  $('#spreadOpt').style.opacity = chosenFormat() === 'jpeg' ? 1 : 0.4;
-  $('#spreadsChk').disabled = chosenFormat() !== 'jpeg';
+  const jpeg = chosenFormat() === 'jpeg';
+  for (const id of ['#spreadOpt', '#coversOpt']) $(id).style.opacity = jpeg ? 1 : 0.4;
+  $('#spreadsChk').disabled = $('#coversChk').disabled = !jpeg;
 }
 $('#exportChoose').addEventListener('change', syncSpreadOpt);
 
@@ -567,12 +765,13 @@ $('#exportChoose').addEventListener('submit', (e) => {
   e.preventDefault();
   const format = chosenFormat();
   const spreads = $('#spreadsChk').checked;
-  try { localStorage.setItem('photobook-export', JSON.stringify({ format, spreads })); } catch {}
-  Object.assign(exportPrefs, { format, spreads });
-  runExport(format, spreads);
+  const covers = $('#coversChk').checked;
+  try { localStorage.setItem('photobook-export', JSON.stringify({ format, spreads, covers })); } catch {}
+  Object.assign(exportPrefs, { format, spreads, covers });
+  runExport(format, spreads, covers);
 });
 
-async function runExport(format, spreads) {
+async function runExport(format, spreads, covers) {
   $('#exportChoose').hidden = true;
   $('#exportRun').hidden = false;
   const isPdf = format === 'pdf';
@@ -588,9 +787,9 @@ async function runExport(format, spreads) {
     let blob;
     if (isPdf) {
       if (!window.PDFLib) throw new Error('PDF library failed to load. Reload the page and try again.');
-      blob = await exportPdf(pages(), S(), { onProgress });
+      blob = await exportPdf(pages(), renderSettings(), { onProgress });
     } else {
-      blob = await exportJpegs(pages(), S(), { spreads, onProgress });
+      blob = await exportJpegs(pages(), renderSettings(), { spreads, covers, onProgress });
     }
     const clean = (t) => String(t || '').replace(/[\\/:*?"<>|]+/g, '').trim();
     const name = `${clean(S().title) || 'photobook'}${S().subtitle ? ' ' + clean(S().subtitle) : ''}${isPdf ? '.pdf' : spreads ? ' spreads.zip' : ' pages.zip'}`;
@@ -612,6 +811,8 @@ $('#exportClose').addEventListener('click', () => $('#exportDialog').close());
 
 // ---------- Boot ----------
 await load();
+inspiration = (await store.getKV('inspiration')) || null;
+if (inspiration) $('#inspImg').src = URL.createObjectURL(inspiration);
 gp.preload();
 const initial = location.hash.slice(1);
 go(['photos', 'groups', 'design'].includes(initial) ? initial : state.photos.length ? 'groups' : 'photos');

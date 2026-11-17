@@ -1,74 +1,78 @@
-// Print-ready PDF export with pdf-lib (vendored as window.PDFLib).
-import { getPhoto } from './store.js';
-import { decode, canvasToBlob } from './images.js';
-import { coverCrop } from './layout.js';
+// Exports: PDF (each page rendered at 300 dpi and embedded) and JPEG pages in a zip.
+import { renderSheet, ensureFonts } from './render.js';
+import { canvasToBlob } from './images.js';
+import { ZipWriter } from './zip.js';
 
-const PT = 72 / 25.4; // points per mm
+const PT = 72 / 25.4;
+const tick = () => new Promise((r) => setTimeout(r, 0));
+const safeName = (t) => String(t || '').replace(/[\\/:*?"<>|]+/g, '').trim();
 
-function hexToRgb(hex) {
-  const n = parseInt(hex.replace('#', ''), 16);
-  return PDFLib.rgb(((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255);
+// Writes the JFIF density so editors read the image as `dpi` (not 72).
+async function jpegBytes(canvas, dpi) {
+  const bytes = new Uint8Array(await (await canvasToBlob(canvas, 'image/jpeg', 0.92)).arrayBuffer());
+  if (bytes[2] === 0xff && bytes[3] === 0xe0 && bytes[6] === 0x4a && bytes[7] === 0x46) {
+    bytes[13] = 1;
+    bytes[14] = dpi >> 8; bytes[15] = dpi & 255;
+    bytes[16] = dpi >> 8; bytes[17] = dpi & 255;
+  }
+  return bytes;
 }
 
-export async function exportPdf(pages, settings, { onProgress, dpi = 300 } = {}) {
-  const { PDFDocument, StandardFonts } = PDFLib;
-  const doc = await PDFDocument.create();
-  doc.setTitle(settings.title || 'Photo book');
+export async function exportPdf(pages, s, { onProgress, dpi = 300 } = {}) {
+  await ensureFonts(s);
+  const doc = await PDFLib.PDFDocument.create();
+  doc.setTitle(s.title || 'Photo book');
   doc.setCreator('Photobook');
-  const font = await doc.embedFont(settings.font === 'sans' ? StandardFonts.Helvetica : StandardFonts.TimesRoman);
-  const b = settings.bleed;
-  const pw = (settings.width + 2 * b) * PT, ph = (settings.height + 2 * b) * PT;
-  const bg = hexToRgb(settings.bg), ink = hexToRgb(settings.ink);
-  const total = pages.reduce((n, p) => n + (p.cells?.length || 0), 0) || 1;
+  const k = dpi / 25.4;
+  const pw = (s.width + 2 * s.bleed) * PT, ph = (s.height + 2 * s.bleed) * PT;
+  for (let i = 0; i < pages.length; i++) {
+    const canvas = await renderSheet([pages[i]], s, { k });
+    const img = await doc.embedJpg(await jpegBytes(canvas, dpi));
+    canvas.width = canvas.height = 0;
+    doc.addPage([pw, ph]).drawImage(img, { x: 0, y: 0, width: pw, height: ph });
+    onProgress?.((i + 1) / pages.length);
+    await tick();
+  }
+  return new Blob([await doc.save({ useObjectStreams: true })], { type: 'application/pdf' });
+}
+
+// Single pages, or spreads: page 1 alone, then 2–3, 4–5 … and the last page alone if it has no partner.
+export function sheets(pages, spreads) {
+  if (!spreads) return pages.map((p, i) => ({ pages: [p], first: i + 1 }));
+  const out = [{ pages: [pages[0]], first: 1 }];
+  for (let i = 1; i < pages.length; i += 2) out.push({ pages: pages.slice(i, i + 2), first: i + 1 });
+  return out;
+}
+
+const labelOf = (p) => (p.type === 'title' ? 'Title page' : p.type === 'blank' ? 'Blank' : p.group);
+
+export async function exportJpegs(pages, s, { spreads = false, covers = true, dpi = 300, onProgress } = {}) {
+  await ensureFonts(s);
+  const zip = new ZipWriter();
+  const k = dpi / 25.4;
+  const list = sheets(pages, spreads);
+  const coverList = covers ? [['Cover - front', { type: 'front' }], ['Cover - back', { type: 'back' }]] : [];
+  const total = list.length + coverList.length;
   let done = 0;
 
-  // pdf coordinates: origin bottom-left, includes bleed
-  const X = (mm) => (mm + b) * PT;
-  const Y = (mm) => ph - (mm + b) * PT;
-
-  const drawText = (page, text, size, yMm) => {
-    if (!text) return;
-    const s = size * PT;
-    let t = text;
-    const maxW = (settings.width - 2 * settings.margin) * PT;
-    while (font.widthOfTextAtSize(t, s) > maxW && t.length > 1) t = t.slice(0, -1);
-    const w = font.widthOfTextAtSize(t, s);
-    page.drawText(t, { x: X(settings.width / 2) - w / 2, y: Y(yMm), size: s, font, color: ink });
-  };
-
-  for (const p of pages) {
-    const page = doc.addPage([pw, ph]);
-    page.drawRectangle({ x: 0, y: 0, width: pw, height: ph, color: bg });
-
-    for (const c of p.cells || []) {
-      const photo = await getPhoto(c.photoId);
-      const bmp = await decode(photo.full);
-      const crop = coverCrop(bmp.width, bmp.height, c.w, c.h);
-      const scale = Math.min(1, ((c.w / 25.4) * dpi) / crop.sw);
-      const canvas = document.createElement('canvas');
-      canvas.width = Math.max(1, Math.round(crop.sw * scale));
-      canvas.height = Math.max(1, Math.round(crop.sh * scale));
-      const ctx = canvas.getContext('2d');
-      ctx.imageSmoothingQuality = 'high';
-      ctx.drawImage(bmp, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, canvas.width, canvas.height);
-      bmp.close?.();
-      const jpg = await doc.embedJpg(await (await canvasToBlob(canvas, 'image/jpeg', 0.9)).arrayBuffer());
-      page.drawImage(jpg, { x: X(c.x), y: Y(c.y + c.h), width: c.w * PT, height: c.h * PT });
-      onProgress?.(++done / total);
-    }
-
-    if (p.type === 'cover') {
-      drawText(page, p.title, p.titleSize, p.titleY);
-      drawText(page, p.subtitle, p.titleSize * 0.5, p.titleY + p.titleSize * 1.05);
-    } else if (p.type === 'divider') {
-      drawText(page, p.title, p.titleSize, settings.height / 2 + p.titleSize * 0.35);
-    } else if (p.title) {
-      drawText(page, p.title, p.titleSize, p.titleY);
-    }
-    // Let the UI breathe between pages.
-    await new Promise((r) => setTimeout(r, 0));
+  for (const [name, page] of coverList) {
+    const canvas = await renderSheet([page], s, { k });
+    zip.add(`${name}.jpg`, await jpegBytes(canvas, dpi));
+    canvas.width = canvas.height = 0;
+    onProgress?.(++done / total);
+    await tick();
   }
 
-  const bytes = await doc.save({ useObjectStreams: true });
-  return new Blob([bytes], { type: 'application/pdf' });
+  const pad = String(pages.length).length;
+  const num = (n) => String(n).padStart(pad, '0');
+  for (const sh of list) {
+    const canvas = await renderSheet(sh.pages, s, { k });
+    const label = sh.pages.map(labelOf).filter((v, i, a) => a.indexOf(v) === i).join(', ');
+    const range = sh.pages.length > 1 ? `${num(sh.first)}-${num(sh.first + 1)}` : num(sh.first);
+    zip.add(`${range} ${safeName(label)}.jpg`, await jpegBytes(canvas, dpi));
+    canvas.width = canvas.height = 0;
+    onProgress?.(++done / total);
+    await tick();
+  }
+  return zip.finish();
 }

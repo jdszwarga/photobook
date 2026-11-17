@@ -8,7 +8,7 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@400;600;700&family=Cormorant+Garamond:wght@400;600;700&family=Libre+Baskerville:wght@400;700&family=DM+Serif+Display&family=Montserrat:wght@400;600;700&family=Josefin+Sans:wght@400;600;700&family=Raleway:wght@400;600;700&family=Bebas+Neue&family=Caveat:wght@400;600;700&family=Dancing+Script:wght@400;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/app.css">
   <script src="js/vendor/pdf-lib.min.js" defer></script>
   <script type="module" src="js/app.js"></script>
@@ -82,7 +82,8 @@
           <button data-act="start" title="Start a new group with this photo">New group here</button>
           <button data-act="next" title="Move this photo (and later ones in its group) to the next group">Next group →</button>
           <button data-act="exclude" id="excludeBtn">Exclude</button>
-          <button data-act="cover">Use as cover</button>
+          <button data-act="front">Front cover</button>
+          <button data-act="back">Back cover</button>
         </div>
         <button class="icon-btn" data-act="close" aria-label="Close">✕</button>
       </div>
@@ -91,11 +92,73 @@
     <!-- 3. Design -->
     <section id="view-design" class="view design" hidden>
       <aside class="panel">
+        <div class="field-group claude">
+          <h3><span class="spark">✦</span> Design with Claude</h3>
+          <div id="claudeSetup" hidden>
+            <p class="hint">Connect your Claude API key and Claude will design the fonts, colours, spacing and covers from your photos.</p>
+            <label>Claude API key<input id="c-key" type="password" placeholder="sk-ant-…" autocomplete="off"></label>
+            <label>Model<select id="c-model"></select></label>
+            <div class="row-actions">
+              <button id="c-save" class="btn dark">Connect</button>
+              <button id="c-cancel" class="link" hidden>Cancel</button>
+              <button id="c-forget" class="link danger" hidden>Forget key</button>
+            </div>
+            <p class="hint">Your key stays in this browser and is only sent to Anthropic. Create one at console.anthropic.com. A design costs a few cents.</p>
+          </div>
+          <div id="claudeReady" hidden>
+            <div class="insp" id="inspBox">
+              <img id="inspImg" alt="Inspiration image" hidden>
+              <span id="inspEmpty">＋ Add an inspiration image <small>a page, poster or photo whose look you like</small></span>
+              <input id="inspInput" type="file" accept="image/*" hidden>
+            </div>
+            <button id="inspRemove" class="link" hidden>Remove inspiration</button>
+            <label>What feel do you want? <small>(optional)</small>
+              <textarea id="c-brief" rows="2" placeholder="e.g. warm and minimal, like a magazine"></textarea>
+            </label>
+            <button id="c-go" class="btn primary"><span class="spark">✦</span> Design my book</button>
+            <div id="c-result" class="c-result" hidden>
+              <p id="c-note"></p>
+              <button id="c-undo" class="link">Undo Claude’s design</button>
+            </div>
+            <button id="c-settings" class="link small">Claude settings</button>
+          </div>
+        </div>
         <div class="field-group">
-          <h3>Book</h3>
+          <h3>Cover</h3>
           <label>Title<input id="s-title" type="text"></label>
           <label>Subtitle<input id="s-subtitle" type="text"></label>
-          <label class="check"><input id="s-cover" type="checkbox"> Cover page with photo</label>
+          <div class="cover-picks">
+            <figure><img id="frontThumb" alt=""><figcaption>Front</figcaption></figure>
+            <figure><img id="backThumb" alt=""><figcaption>Back</figcaption></figure>
+            <p class="hint">Pick cover photos in <button class="link" data-goto="groups">Groups</button>: select a photo, then Front cover or Back cover.</p>
+          </div>
+          <div class="row2">
+            <label>Front layout
+              <select id="f-layout">
+                <option value="full">Full-bleed photo</option>
+                <option value="framed">Framed photo</option>
+                <option value="band">Photo + title band</option>
+                <option value="inset">Small centred photo</option>
+              </select>
+            </label>
+            <label>Title position
+              <select id="f-pos"><option value="top">Top</option><option value="center">Centre</option><option value="bottom">Bottom</option></select>
+            </label>
+          </div>
+          <div class="row2">
+            <label>Shade behind title<input id="f-overlay" type="range" min="0" max="0.7" step="0.05"></label>
+            <label>Title colour on photo<input id="f-text" type="color"></label>
+          </div>
+          <label>Back layout
+            <select id="b-layout">
+              <option value="small">Small centred photo</option>
+              <option value="full">Full-bleed photo</option>
+              <option value="framed">Framed photo</option>
+              <option value="none">No photo</option>
+            </select>
+          </label>
+          <label>Back cover text<input id="b-text" type="text" placeholder="e.g. The Smith family · 2026"></label>
+          <label class="check"><input id="s-cover" type="checkbox"> Also use the front design as a title page inside</label>
         </div>
         <div class="field-group">
           <h3>Size</h3>
@@ -127,12 +190,31 @@
               <option value="none">Don't show</option>
             </select>
           </label>
-          <div class="seg" id="s-font" role="radiogroup" aria-label="Font">
-            <button data-v="serif" class="serif">Serif</button><button data-v="sans" class="sans">Sans</button>
+        </div>
+        <div class="field-group">
+          <h3>Style</h3>
+          <div class="row2">
+            <label>Font<select id="s-font"></select></label>
+            <label>Weight<select id="s-weight"></select></label>
           </div>
           <div class="row2">
+            <div class="seg" id="s-case" role="radiogroup" aria-label="Title case"><button data-v="none">Aa</button><button data-v="upper">AA</button></div>
+            <div class="seg" id="s-align" role="radiogroup" aria-label="Title alignment"><button data-v="center">Centre</button><button data-v="left">Left</button></div>
+          </div>
+          <div class="row2">
+            <label>Title size<input id="s-scale" type="range" min="0.6" max="1.8" step="0.05"></label>
+            <label>Letter spacing<input id="s-tracking" type="range" min="0" max="0.3" step="0.01"></label>
+          </div>
+          <label class="check"><input id="s-rule" type="checkbox"> Accent line under group names</label>
+          <div class="row3">
             <label>Background<input id="s-bg" type="color"></label>
             <label>Text<input id="s-ink" type="color"></label>
+            <label>Accent<input id="s-accent" type="color"></label>
+          </div>
+          <div class="row3">
+            <label>Corners<input id="s-radius" type="range" min="0" max="8" step="0.5"></label>
+            <label>Border<input id="s-stroke" type="range" min="0" max="4" step="0.25"></label>
+            <label>Border colour<input id="s-strokeColor" type="color"></label>
           </div>
         </div>
         <p id="bookStats" class="stats"></p>
@@ -155,9 +237,12 @@
         <label class="check sub" id="spreadOpt">
           <input type="checkbox" id="spreadsChk"> Join facing pages into spreads, for lay-flat books (first and last pages stay single)
         </label>
+        <label class="check sub" id="coversOpt">
+          <input type="checkbox" id="coversChk" checked> Include front and back cover images
+        </label>
         <label class="choice">
           <input type="radio" name="format" value="pdf">
-          <span><strong>PDF</strong>One print-ready file for printers that take PDFs, e.g. Blurb.</span>
+          <span><strong>PDF</strong>One print-ready file of the inside pages for printers that take PDFs, e.g. Blurb. Covers aren't included.</span>
         </label>
       </div>
       <div class="dialog-actions">

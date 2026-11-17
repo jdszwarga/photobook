@@ -130,17 +130,10 @@ export function planBook(groups, project) {
   const pages = [];
   const visible = groups.map((gr) => ({ ...gr, photos: gr.photos.filter((p) => !project.excluded.has(p.id)) })).filter((gr) => gr.photos.length);
 
-  if (s.cover) {
-    const first = visible[0]?.photos[0];
-    const coverId = project.coverId && visible.some((gr) => gr.photos.some((p) => p.id === project.coverId)) ? project.coverId : first?.id;
-    const ts = titleSizeMm(s) * 1.5;
-    const textH = ts * (s.subtitle ? 3.2 : 2.2);
-    const cells = coverId ? [{ photoId: coverId, x: box.x, y: box.y, w: box.w, h: box.h - textH }] : [];
-    pages.push({ type: 'cover', key: 'cover', cells, title: s.title, subtitle: s.subtitle, titleSize: ts, titleY: box.y + box.h - textH + ts * 1.55 });
-  }
+  if (s.cover) pages.push({ type: 'title', key: 'title' });
 
   for (const gr of visible) {
-    const ts = titleSizeMm(s);
+    const ts = titleSizeMm(s) * (s.titleScale || 1);
     if (s.titleMode === 'divider') pages.push({ type: 'divider', key: `div-${gr.key}`, title: gr.name, titleSize: ts * 1.6, group: gr.name });
     const sizes = split(gr.photos.length, s.minPer, s.maxPer);
     let i = 0;
@@ -148,14 +141,14 @@ export function planBook(groups, project) {
       const photos = gr.photos.slice(i, i + n);
       i += n;
       const header = s.titleMode === 'header' && pi === 0;
-      const headerH = header ? ts * 2 : 0;
+      const headerH = header ? ts * (s.titleRule ? 2.3 : 1.9) : 0;
       const area = { x: box.x, y: box.y + headerH, w: box.w, h: box.h - headerH };
       const key = `${gr.key}-${pi}`;
       const options = rowLayouts(photos.map(aspectOf), area.w, area.h, g);
       const pick = options[(project.shuffles[key] || 0) % options.length];
       pages.push({
         type: 'photos', key, group: gr.name, variants: options.length,
-        title: header ? gr.name : null, titleSize: ts, titleY: box.y + ts * 1.15,
+        title: header ? gr.name : null, titleSize: ts, titleY: box.y + ts * 0.8,
         cells: pick.map((c, k) => ({ photoId: photos[k].id, x: area.x + c.x, y: area.y + c.y, w: c.w, h: c.h })),
       });
     });
